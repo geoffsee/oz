@@ -32,7 +32,10 @@ async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 export function App() {
+  const [csrfToken, setCsrfToken] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -51,11 +54,25 @@ export function App() {
 
   const hasProjects = projects.length > 0;
 
+  const apiRequest = async <T,>(path: string, opts: RequestInit = {}) => {
+    const method = (opts.method ?? "GET").toUpperCase();
+    const headers = new Headers(opts.headers);
+
+    if (csrfToken && mutatingMethods.has(method)) {
+      headers.set("X-CSRF-Token", csrfToken);
+    }
+
+    return api<T>(path, {
+      ...opts,
+      headers,
+    });
+  };
+
   const setSuccessMessage = (text: string) => setMessage({ text, isError: false });
   const setErrorMessage = (error: unknown) => setMessage({ text: error instanceof Error ? error.message : String(error), isError: true });
 
   const refreshProjects = async () => {
-    const loadedProjects = await api<Project[]>("/api/projects");
+    const loadedProjects = await apiRequest<Project[]>("/api/projects");
     setProjects(loadedProjects);
 
     if (!loadedProjects.length) {
@@ -81,7 +98,7 @@ export function App() {
   };
 
   const refreshKeys = async () => {
-    const loadedKeys = await api<ApiKey[]>("/api/keys");
+    const loadedKeys = await apiRequest<ApiKey[]>("/api/keys");
     setKeys(loadedKeys);
   };
 
@@ -90,7 +107,7 @@ export function App() {
       setSecrets([]);
       return;
     }
-    const loadedSecrets = await api<SecretListItem[]>(`/api/projects/${slug}/secrets`);
+    const loadedSecrets = await apiRequest<SecretListItem[]>(`/api/projects/${slug}/secrets`);
     setSecrets(loadedSecrets);
   };
 
@@ -99,10 +116,13 @@ export function App() {
       try {
         const loadedMe = await api<Me>("/api/me");
         setMe(loadedMe);
+        const csrf = await api<{ token: string }>("/api/csrf");
+        setCsrfToken(csrf.token);
         await refreshProjects();
         await refreshKeys();
       } catch {
         setMe(null);
+        setCsrfToken(null);
       } finally {
         setAuthChecked(true);
       }
@@ -118,13 +138,13 @@ export function App() {
   }, [selectedSecretProject]);
 
   const onLogout = async () => {
-    await api<null>("/auth/logout", { method: "POST" });
+    await apiRequest<null>("/auth/logout", { method: "POST" });
     location.reload();
   };
 
   const onCreateProject = async () => {
     try {
-      await api<null>("/api/projects", {
+      await apiRequest<null>("/api/projects", {
         method: "POST",
         body: JSON.stringify({ slug: projectSlug, name: projectName }),
       });
@@ -144,7 +164,7 @@ export function App() {
         throw new Error("Choose a project before creating a key");
       }
 
-      const created = await api<{ key: string }>("/api/keys", {
+      const created = await apiRequest<{ key: string }>("/api/keys", {
         method: "POST",
         body: JSON.stringify({
           name: keyName,
@@ -160,17 +180,17 @@ export function App() {
   };
 
   const onRevokeKey = async (id: string) => {
-    await api<null>(`/api/keys/${id}`, { method: "DELETE" });
+    await apiRequest<null>(`/api/keys/${id}`, { method: "DELETE" });
     await refreshKeys();
   };
 
   const onRevealSecret = async (slug: string, key: string) => {
-    const value = await api<SecretValue>(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`);
+    const value = await apiRequest<SecretValue>(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`);
     alert(`${value.key_name} = ${value.value}`);
   };
 
   const onDeleteSecret = async (slug: string, key: string) => {
-    await api<null>(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, { method: "DELETE" });
+    await apiRequest<null>(`/api/projects/${slug}/secrets/${encodeURIComponent(key)}`, { method: "DELETE" });
     await refreshSecrets(slug);
   };
 
@@ -179,7 +199,7 @@ export function App() {
       if (!selectedSecretProject) {
         throw new Error("Choose a project before saving a secret");
       }
-      await api<null>(`/api/projects/${selectedSecretProject}/secrets/${encodeURIComponent(secretKey)}`, {
+      await apiRequest<null>(`/api/projects/${selectedSecretProject}/secrets/${encodeURIComponent(secretKey)}`, {
         method: "PUT",
         body: JSON.stringify({ value: secretValue }),
       });

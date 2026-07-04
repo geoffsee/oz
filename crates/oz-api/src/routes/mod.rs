@@ -1,19 +1,20 @@
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use oz_core::{
-    validate_slug, ApiKeyPermission, MemberRole, Profile, Project, SecretMeta, SecretValue,
+    parse_api_key, parse_bearer, validate_slug, ApiKeyPermission, MemberRole, Profile, Project,
+    SecretMeta, SecretValue,
 };
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_sessions::Session;
+use uuid::Uuid;
 use worker::send;
 
 use crate::auth::github::{finish_github_oauth, start_github_oauth};
-use crate::auth::{AuthContext, ProjectAccess};
-use crate::session_store::SESSION_PROFILE_KEY;
 use crate::crypto::{decrypt_secret, encrypt_secret, unwrap_dek};
 use crate::db::api_keys::{create_api_key, list_api_keys, revoke_api_key};
 use crate::db::profiles::get_profile_by_login;
@@ -22,7 +23,11 @@ use crate::db::projects::{
 };
 use crate::db::secrets::{delete_secret, get_secret_row, list_secrets, upsert_secret};
 use crate::error::{bad_request, AppError, AppResult};
+use crate::auth::{AuthContext, AuthMethod, ProjectAccess};
+use crate::session_store::{SESSION_CSRF_TOKEN_KEY, SESSION_PROFILE_KEY};
 use crate::state::AppState;
+
+const CSRF_HEADER: &str = "x-csrf-token";
 
 pub fn api_router() -> Router<AppState> {
     Router::new()
@@ -31,6 +36,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/auth/github/callback", get(auth_github_callback))
         .route("/auth/logout", post(auth_logout))
         .route("/api/me", get(api_me))
+        .route("/api/csrf", get(csrf_token_handler))
         .route("/api/projects", get(list_projects).post(create_project_handler))
         .route(
             "/api/projects/{slug}/members",
@@ -108,17 +114,34 @@ async fn auth_github_callback(
         .insert(SESSION_PROFILE_KEY, profile.id)
         .await
         .map_err(|_| AppError::Internal)?;
+    session
+        .insert(SESSION_CSRF_TOKEN_KEY, new_csrf_token())
+        .await
+        .map_err(|_| AppError::Internal)?;
     Ok(Redirect::to("/"))
 }
 
 #[send]
-async fn auth_logout(session: Session) -> AppResult<StatusCode> {
+async fn auth_logout(auth: AuthContext, headers: HeaderMap, session: Session) -> AppResult<StatusCode> {
+    enforce_csrf(&auth, &session, &headers).await?;
     session.delete().await.map_err(|_| AppError::Internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn api_me(auth: AuthContext) -> Json<Profile> {
     Json(auth.profile)
+}
+
+#[derive(Serialize)]
+struct CsrfTokenResponse {
+    token: String,
+}
+
+#[send]
+async fn csrf_token_handler(auth: AuthContext, session: Session) -> AppResult<Json<CsrfTokenResponse>> {
+    auth.require_session()?;
+    let token = ensure_csrf_token(&session).await?;
+    Ok(Json(CsrfTokenResponse { token }))
 }
 
 #[send]
@@ -145,9 +168,12 @@ struct CreateProjectBody {
 #[send]
 async fn create_project_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     Json(body): Json<CreateProjectBody>,
 ) -> AppResult<(StatusCode, Json<Project>)> {
+    enforce_csrf(&auth, &session, &headers).await?;
     auth.require_session()?;
     validate_slug(&body.slug).map_err(|e| bad_request(e))?;
     if body.name.trim().is_empty() {
@@ -210,10 +236,13 @@ async fn list_members_handler(
 #[send]
 async fn add_member_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     axum::extract::Path(slug): axum::extract::Path<String>,
     Json(body): Json<MemberBody>,
 ) -> AppResult<StatusCode> {
+    enforce_csrf(&auth, &session, &headers).await?;
     auth.require_session()?;
     let access = auth.project_access(&state, &slug).await?;
     if !access.can_admin {
@@ -235,10 +264,13 @@ struct RemoveMemberQuery {
 #[send]
 async fn remove_member_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     axum::extract::Path(slug): axum::extract::Path<String>,
     Query(q): Query<RemoveMemberQuery>,
 ) -> AppResult<StatusCode> {
+    enforce_csrf(&auth, &session, &headers).await?;
     auth.require_session()?;
     let access = auth.project_access(&state, &slug).await?;
     if !access.can_admin {
@@ -275,9 +307,12 @@ async fn list_keys_handler(
 #[send]
 async fn create_key_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     Json(body): Json<CreateKeyBody>,
 ) -> AppResult<(StatusCode, Json<oz_core::CreateApiKeyResponse>)> {
+    enforce_csrf(&auth, &session, &headers).await?;
     auth.require_session()?;
     if body.name.trim().is_empty() {
         return Err(bad_request("name required"));
@@ -302,9 +337,12 @@ async fn create_key_handler(
 #[send]
 async fn revoke_key_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> AppResult<StatusCode> {
+    enforce_csrf(&auth, &session, &headers).await?;
     auth.require_session()?;
     if !revoke_api_key(&state.db()?, &auth.profile.id, &id).await? {
         return Err(AppError::NotFound);
@@ -347,10 +385,13 @@ struct PutSecretBody {
 #[send]
 async fn put_secret_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     axum::extract::Path((slug, key)): axum::extract::Path<(String, String)>,
     Json(body): Json<PutSecretBody>,
 ) -> AppResult<Json<SecretValue>> {
+    enforce_csrf(&auth, &session, &headers).await?;
     let access = auth.project_access(&state, &slug).await?;
     if !access.can_write {
         return Err(AppError::NotFound);
@@ -366,9 +407,12 @@ async fn put_secret_handler(
 #[send]
 async fn delete_secret_handler(
     auth: AuthContext,
+    headers: HeaderMap,
+    session: Session,
     State(state): State<AppState>,
     axum::extract::Path((slug, key)): axum::extract::Path<(String, String)>,
 ) -> AppResult<StatusCode> {
+    enforce_csrf(&auth, &session, &headers).await?;
     let access = auth.project_access(&state, &slug).await?;
     if !access.can_write {
         return Err(AppError::NotFound);
@@ -458,6 +502,115 @@ async fn test_github_user(State(state): State<AppState>) -> AppResult<Json<GitHu
         name: Some("Test User".into()),
         avatar_url: Some("https://example.com/avatar.png".into()),
     }))
+}
+
+fn new_csrf_token() -> String {
+    Uuid::new_v4().to_string()
+}
+
+fn auth_uses_api_key(auth: &AuthContext, auth_header: Option<&str>) -> bool {
+    if matches!(auth.method, AuthMethod::ApiKey) {
+        return true;
+    }
+    parse_bearer(auth_header)
+        .and_then(parse_api_key)
+        .is_some()
+}
+
+fn validate_csrf_values(provided: Option<&str>, expected: Option<&str>) -> AppResult<()> {
+    let Some(expected) = expected else {
+        return Err(bad_request("csrf token missing"));
+    };
+    let Some(provided) = provided else {
+        return Err(bad_request("csrf token missing"));
+    };
+    if bool::from(provided.as_bytes().ct_eq(expected.as_bytes())) {
+        Ok(())
+    } else {
+        Err(bad_request("invalid csrf token"))
+    }
+}
+
+#[send]
+async fn ensure_csrf_token(session: &Session) -> AppResult<String> {
+    if let Some(existing) = session
+        .get::<String>(SESSION_CSRF_TOKEN_KEY)
+        .await
+        .map_err(|_| AppError::Internal)?
+    {
+        return Ok(existing);
+    }
+
+    let token = new_csrf_token();
+    session
+        .insert(SESSION_CSRF_TOKEN_KEY, token.clone())
+        .await
+        .map_err(|_| AppError::Internal)?;
+    Ok(token)
+}
+
+#[send]
+async fn enforce_csrf(auth: &AuthContext, session: &Session, headers: &HeaderMap) -> AppResult<()> {
+    if auth_uses_api_key(
+        auth,
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+    ) {
+        return Ok(());
+    }
+
+    auth.require_session()?;
+
+    let expected = session
+        .get::<String>(SESSION_CSRF_TOKEN_KEY)
+        .await
+        .map_err(|_| AppError::Internal)?;
+    let provided = headers.get(CSRF_HEADER).and_then(|value| value.to_str().ok());
+    validate_csrf_values(provided, expected.as_deref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_auth(method: AuthMethod) -> AuthContext {
+        AuthContext {
+            profile: Profile {
+                id: "profile-1".into(),
+                github_id: 1,
+                login: "user".into(),
+                name: Some("User".into()),
+                avatar_url: Some("https://example.com/a.png".into()),
+            },
+            method,
+            api_key: None,
+        }
+    }
+
+    #[test]
+    fn csrf_allows_api_key_requests_without_token() {
+        let auth = fake_auth(AuthMethod::ApiKey);
+        assert!(auth_uses_api_key(&auth, None));
+    }
+
+    #[test]
+    fn csrf_rejects_missing_token() {
+        let err = validate_csrf_values(None, Some("expected")).expect_err("should reject missing token");
+        assert!(matches!(err, AppError::BadRequest(message) if message == "csrf token missing"));
+    }
+
+    #[test]
+    fn csrf_rejects_invalid_token() {
+        let err = validate_csrf_values(Some("wrong"), Some("expected"))
+            .expect_err("should reject invalid token");
+        assert!(matches!(err, AppError::BadRequest(message) if message == "invalid csrf token"));
+    }
+
+    #[test]
+    fn csrf_accepts_matching_token() {
+        validate_csrf_values(Some("expected"), Some("expected")).expect("should accept matching token");
+    }
 }
 
 #[derive(Serialize)]

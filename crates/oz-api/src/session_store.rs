@@ -8,6 +8,7 @@ use worker::send::SendWrapper;
 use worker::Env;
 
 pub const SESSION_PROFILE_KEY: &str = "profile_id";
+pub const SESSION_CSRF_TOKEN_KEY: &str = "csrf_token";
 
 #[derive(Clone)]
 pub struct D1SessionStore {
