@@ -44,3 +44,42 @@ oz auth login --api-key your-api-key --api-url https://your-oz-api.example.com
 oz secrets set DATABASE_URL --project my-app "postgres://..."
 oz secrets get DATABASE_URL --project my-app
 ```
+
+## SDK usage
+
+### Node.js SDK
+
+```bash
+npm install @oz/oz-node-sdk
+```
+
+```js
+import { OzNodeSdkClient } from '@oz/oz-node-sdk';
+
+const client = new OzNodeSdkClient({
+  baseUrl: 'https://your-oz-api.example.com',
+  apiKey: 'oz_live_xxx',
+});
+
+const project = 'my-app';
+
+// List secrets in a project
+const secretList = await client.v2_list_secrets({ body: { project } });
+console.log(secretList);
+
+// Write a secret
+await client.v2_write_secret({
+  body: {
+    project,
+    key: 'DATABASE_URL',
+    value: 'postgres://...',
+  },
+});
+
+// Read a secret
+const secret = await client.v2_read_secret({ body: { project, key: 'DATABASE_URL' } });
+console.log(secret.value);
+
+// Delete a secret
+await client.v2_delete_secret({ body: { project, key: 'DATABASE_URL' } });
+```
