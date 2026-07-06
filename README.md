@@ -51,11 +51,11 @@ oz secrets get DATABASE_URL --project my-app
 ### Node.js SDK
 
 ```bash
-npm install @oz/oz-node-sdk
+npm install oz-node-sdk
 ```
 
 ```js
-import { OzNodeSdkClient } from '@oz/oz-node-sdk';
+import { OzNodeSdkClient } from 'oz-node-sdk';
 
 const client = new OzNodeSdkClient({
   baseUrl: 'https://your-oz-api.example.com',

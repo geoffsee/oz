@@ -5,13 +5,13 @@ Generated Node.js SDK for the oz API.
 ## Install
 
 ```bash
-bun add @oz/oz-node-sdk
+bun add oz-node-sdk
 ```
 
 or
 
 ```bash
-npm install @oz/oz-node-sdk
+npm install oz-node-sdk
 ```
 
 ## Build
@@ -37,7 +37,7 @@ bun publish --access public
 ## Usage
 
 ```js
-import { OzNodeSdkClient } from '@oz/oz-node-sdk';
+import { OzNodeSdkClient } from 'oz-node-sdk';
 
 const client = new OzNodeSdkClient({
   baseUrl: 'http://localhost:8787',

@@ -31,7 +31,7 @@ Script purpose:
 - `openapi`: regenerates `target/openapi/openapi.json` via `cargo build -p oz-api`.
 - `sdk:build`: generates `packages/oz-node-sdk/dist` from OpenAPI.
 - `sdk:rebuild`: regenerates OpenAPI then SDK.
-- `sdk:publish`: regenerates OpenAPI then publishes `@oz/oz-node-sdk`.
+- `sdk:publish`: regenerates OpenAPI then publishes `oz-node-sdk`.
 - `workspace:install`: installs workspace deps for root, `apps/web`, and `packages/oz-node-sdk`.
 - `build:web` / `dev:web` / `test:web`: run web client scripts.
 - `test:api` / `test:cli` / `test:all`: run Rust tests.
