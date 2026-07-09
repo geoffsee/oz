@@ -1,0 +1,74 @@
+name: Install oz CLI
+description: Install the oz CLI from geoffsee/oz GitHub releases.
+inputs:
+  version:
+    description: "Version tag to install (without leading v). Use `latest` to install the most recent release."
+    required: false
+    default: "latest"
+  target:
+    description: "Optional target triple override (for example x86_64-unknown-linux-gnu)."
+    required: false
+    default: ""
+  install-dir:
+    description: "Directory where the oz binary will be installed."
+    required: false
+    default: /usr/local/bin
+outputs:
+  binary-path:
+    description: "Absolute path to the installed oz binary."
+    value: ${{ steps.install.outputs.binary-path }}
+  version:
+    description: "Resolved version installed."
+    value: ${{ steps.install.outputs.version }}
+runs:
+  using: "composite"
+  steps:
+    - id: install
+      name: Install oz CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        VERSION_INPUT="${{ inputs.version }}"
+        TARGET_INPUT="${{ inputs.target }}"
+        INSTALL_DIR="${{ inputs.install-dir }}"
+
+        if [ "${VERSION_INPUT}" = "latest" ]; then
+          VERSION="$(curl -fsSL https://api.github.com/repos/geoffsee/oz/releases/latest | jq -r .tag_name | sed 's/^v//')"
+        else
+          VERSION="${VERSION_INPUT#v}"
+        fi
+
+        if [ -z "${TARGET_INPUT}" ]; then
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64|amd64) ARCH="x86_64" ;;
+            aarch64|arm64) ARCH="aarch64" ;;
+            *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+          esac
+          case "$OS" in
+            linux) TARGET="${ARCH}-unknown-linux-gnu" ;;
+            darwin) TARGET="${ARCH}-apple-darwin" ;;
+            *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
+          esac
+        else
+          TARGET="${TARGET_INPUT}"
+        fi
+
+        echo "Installing oz CLI v${VERSION} (${TARGET})..."
+        TEMP_DIR="$(mktemp -d)"
+        trap 'rm -rf "$TEMP_DIR"' EXIT
+
+        curl -fsSL "https://github.com/geoffsee/oz/releases/download/v${VERSION}/cli-${VERSION}-${TARGET}.tar.gz" \
+          | tar -xz -C "$TEMP_DIR"
+
+        chmod +x "$TEMP_DIR/oz"
+
+        mkdir -p "$INSTALL_DIR"
+        sudo mv "$TEMP_DIR/oz" "$INSTALL_DIR/oz"
+        "$INSTALL_DIR/oz" --help >/dev/null
+
+        echo "binary-path=${INSTALL_DIR}/oz" >> "$GITHUB_OUTPUT"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "Installed oz CLI to: ${INSTALL_DIR}/oz (version ${VERSION})"
