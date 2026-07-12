@@ -47,5 +47,6 @@ mod tests {
         assert!(validate_slug("bad-").is_err());
         assert!(validate_slug("a--b").is_err());
         assert!(validate_slug("api").is_err());
+        assert!(validate_slug(&"a".repeat(65)).is_err());
     }
 }

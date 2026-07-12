@@ -38,7 +38,10 @@ struct ErrorBody {
 
 impl From<worker::Error> for AppError {
     fn from(err: worker::Error) -> Self {
+        #[cfg(not(test))]
         worker::console_error!("{err}");
+        #[cfg(test)]
+        eprintln!("{err}");
         AppError::Internal
     }
 }
@@ -50,6 +53,50 @@ pub fn bad_request(msg: impl Into<String>) -> AppError {
 }
 
 pub fn internal<E: std::fmt::Display>(err: E) -> AppError {
+    #[cfg(not(test))]
     worker::console_error!("{err}");
+    #[cfg(test)]
+    eprintln!("{err}");
     AppError::Internal
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_into_response() {
+        let resp = AppError::Unauthorized.into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let resp = AppError::NotFound.into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let resp = AppError::BadRequest("bad".into()).into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let resp = AppError::Conflict("conflict".into()).into_response();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+        let resp = AppError::Internal.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_bad_request() {
+        let err = bad_request("test bad request");
+        assert_eq!(err.to_string(), "bad request: test bad request");
+    }
+
+    #[test]
+    fn test_internal() {
+        let err = internal("some internal error");
+        assert_eq!(err.to_string(), "internal error");
+    }
+
+    #[test]
+    fn test_worker_error() {
+        let err: AppError = worker::Error::from("worker error").into();
+        assert_eq!(err.to_string(), "internal error");
+    }
 }

@@ -28,6 +28,7 @@
     "workspace:install": "bun install && bun run workspace:install:web && bun run workspace:install:sdk",
     "test:api": "cargo test -p ozzy-api",
     "test:cli": "cargo test -p ozzy-cli",
-    "test:all": "cargo test"
+    "test:all": "cargo test",
+    "test:coverage": "bash scripts/coverage-report.sh"
   }
 }

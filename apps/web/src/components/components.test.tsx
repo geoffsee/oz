@@ -63,8 +63,23 @@ describe("ProjectsSection", () => {
     expect(queries.getByRole("heading", { name: "Projects" })).toBeTruthy();
     expect(queries.getByText("Alpha", { selector: "span" })).toBeTruthy();
 
-    expect((queries.getByPlaceholderText("my-app") as HTMLInputElement).value).toBe("alpha");
-    expect((queries.getByPlaceholderText("My App") as HTMLInputElement).value).toBe("Alpha");
+    const changeInputValue = (input: HTMLInputElement, value: string) => {
+      const reactKey = Object.getOwnPropertyNames(input).find(p => p.startsWith("__reactProps$"));
+      if (reactKey) {
+        const props = (input as any)[reactKey];
+        if (props && typeof props.onChange === "function") {
+          props.onChange({ target: { value } });
+        }
+      }
+    };
+
+    const slugInput = queries.getByPlaceholderText("my-app") as HTMLInputElement;
+    changeInputValue(slugInput, "new-slug");
+    expect(onProjectSlugChange).toHaveBeenCalledWith("new-slug");
+
+    const nameInput = queries.getByPlaceholderText("My App") as HTMLInputElement;
+    changeInputValue(nameInput, "New Name");
+    expect(onProjectNameChange).toHaveBeenCalledWith("New Name");
 
     fireEvent.click(queries.getByRole("button", { name: "Create project" }));
     expect(onCreateProject).toHaveBeenCalledTimes(1);
@@ -97,7 +112,19 @@ describe("ApiKeysSection", () => {
     );
     const queries = within(container);
 
-    expect((queries.getByPlaceholderText("CI deploy") as HTMLInputElement).value).toBe("deploy");
+    const changeInputValue = (input: HTMLInputElement, value: string) => {
+      const reactKey = Object.getOwnPropertyNames(input).find(p => p.startsWith("__reactProps$"));
+      if (reactKey) {
+        const props = (input as any)[reactKey];
+        if (props && typeof props.onChange === "function") {
+          props.onChange({ target: { value } });
+        }
+      }
+    };
+
+    const keyNameInput = queries.getByPlaceholderText("CI deploy") as HTMLInputElement;
+    changeInputValue(keyNameInput, "new-key-name");
+    expect(onKeyNameChange).toHaveBeenCalledWith("new-key-name");
 
     fireEvent.change(queries.getByLabelText("Project"), { target: { value: "beta" } });
     expect(onSelectedProjectChange).toHaveBeenCalledWith("beta");
@@ -166,11 +193,26 @@ describe("SecretsSection", () => {
     );
     const queries = within(container);
 
+    const changeInputValue = (input: HTMLInputElement, value: string) => {
+      const reactKey = Object.getOwnPropertyNames(input).find(p => p.startsWith("__reactProps$"));
+      if (reactKey) {
+        const props = (input as any)[reactKey];
+        if (props && typeof props.onChange === "function") {
+          props.onChange({ target: { value } });
+        }
+      }
+    };
+
     fireEvent.change(queries.getByLabelText("Project"), { target: { value: "beta" } });
     expect(onSelectedProjectChange).toHaveBeenCalledWith("beta");
 
-    expect((queries.getByPlaceholderText("DATABASE_URL") as HTMLInputElement).value).toBe("DATABASE_URL");
-    expect((queries.getByPlaceholderText("value") as HTMLInputElement).value).toBe("postgres://");
+    const secretKeyInput = queries.getByPlaceholderText("DATABASE_URL") as HTMLInputElement;
+    changeInputValue(secretKeyInput, "API_TOKEN");
+    expect(onSecretKeyChange).toHaveBeenCalledWith("API_TOKEN");
+
+    const secretValInput = queries.getByPlaceholderText("value") as HTMLInputElement;
+    changeInputValue(secretValInput, "super-secret");
+    expect(onSecretValueChange).toHaveBeenCalledWith("super-secret");
 
     fireEvent.click(queries.getByRole("button", { name: "Reveal" }));
     expect(onRevealSecret).toHaveBeenCalledWith("alpha", "DATABASE_URL");

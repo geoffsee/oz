@@ -102,3 +102,107 @@ pub fn generate_api_key_token() -> String {
         uuid::Uuid::new_v4().simple()
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_random_bytes() {
+        let r1 = random_bytes(16).unwrap();
+        let r2 = random_bytes(16).unwrap();
+        assert_eq!(r1.len(), 16);
+        assert_eq!(r2.len(), 16);
+        assert_ne!(r1, r2);
+
+        assert!(random_bytes(0).is_ok());
+    }
+
+    #[test]
+    fn test_sha256() {
+        let data = b"hello";
+        let hex = sha256_hex(data);
+        let raw = sha256_raw(data);
+        assert_eq!(hex, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        assert_eq!(raw.len(), 32);
+        assert_eq!(hex_encode(&raw), hex);
+    }
+
+    #[test]
+    fn test_hmac_sha256_b64() {
+        let key = b"my-secret-key";
+        let data = b"some data to sign";
+        let sig = hmac_sha256_b64(key, data).unwrap();
+        assert!(!sig.is_empty());
+    }
+
+    #[test]
+    fn test_constant_time_eq() {
+        assert!(constant_time_eq("hello", "hello"));
+        assert!(!constant_time_eq("hello", "world"));
+        assert!(!constant_time_eq("hello", "helloo"));
+    }
+
+    #[test]
+    fn test_decode_master_key() {
+        // Valid 32-byte key base64 encoded
+        let key = vec![42u8; 32];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&key);
+        let decoded = decode_master_key(&b64).unwrap();
+        assert_eq!(decoded, key);
+
+        // Invalid length
+        let key_short = vec![42u8; 31];
+        let b64_short = base64::engine::general_purpose::STANDARD.encode(&key_short);
+        assert!(decode_master_key(&b64_short).is_err());
+
+        // Invalid base64
+        assert!(decode_master_key("invalid-base64-!!!").is_err());
+    }
+
+    #[test]
+    fn test_dek_wrapping() {
+        let master_key = vec![1u8; 32];
+        let (dek, wrapped) = generate_and_wrap_dek(&master_key).unwrap();
+        assert_eq!(dek.len(), 32);
+        assert_eq!(wrapped.nonce.len(), 12);
+
+        let unwrapped = unwrap_dek(&master_key, &wrapped.wrapped, &wrapped.nonce).unwrap();
+        assert_eq!(unwrapped, dek);
+
+        // Bad master key
+        let bad_master_key = vec![2u8; 32];
+        assert!(unwrap_dek(&bad_master_key, &wrapped.wrapped, &wrapped.nonce).is_err());
+
+        // Bad ciphertext/nonce
+        assert!(unwrap_dek(&master_key, &wrapped.wrapped, &vec![0u8; 12]).is_err());
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_secret() {
+        let dek = vec![7u8; 32];
+        let plaintext = "my secret message";
+        let (ciphertext, nonce) = encrypt_secret(&dek, plaintext).unwrap();
+
+        let decrypted = decrypt_secret(&dek, &ciphertext, &nonce).unwrap();
+        assert_eq!(decrypted, plaintext);
+
+        // Bad dek
+        let bad_dek = vec![8u8; 32];
+        assert!(decrypt_secret(&bad_dek, &ciphertext, &nonce).is_err());
+
+        // Bad ciphertext
+        let mut bad_ciphertext = ciphertext.clone();
+        if !bad_ciphertext.is_empty() {
+            bad_ciphertext[0] ^= 1;
+        }
+        assert!(decrypt_secret(&dek, &bad_ciphertext, &nonce).is_err());
+    }
+
+    #[test]
+    fn test_generate_api_key_token() {
+        let token = generate_api_key_token();
+        assert!(token.starts_with(ozzy_core::API_KEY_PREFIX));
+        assert_eq!(token.len(), ozzy_core::API_KEY_PREFIX.len() + 32);
+    }
+}

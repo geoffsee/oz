@@ -29,6 +29,8 @@ mod tests {
         );
         assert_eq!(parse_bearer(Some("Basic x")), None);
         assert_eq!(parse_bearer(None), None);
+        assert_eq!(parse_bearer(Some("Bearer ")), None);
+        assert_eq!(parse_bearer(Some("Bearer   ")), None);
     }
 
     #[test]
@@ -36,5 +38,11 @@ mod tests {
         let key = format!("{API_KEY_PREFIX}{}", "a".repeat(32));
         assert!(parse_api_key(&key).is_some());
         assert!(parse_api_key("ozzy_live_short").is_none());
+    }
+
+    #[test]
+    fn test_api_key_prefix() {
+        assert_eq!(api_key_prefix("ozzy_live_123456789"), "ozzy_live_123456");
+        assert_eq!(api_key_prefix("abc"), "abc");
     }
 }

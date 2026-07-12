@@ -1,6 +1,9 @@
 # Rust
 /target
 
+# Coverage reports
+/coverage
+
 # Cloudflare Workers (ozzy-api)
 node_modules
 .wrangler

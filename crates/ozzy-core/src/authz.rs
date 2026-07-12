@@ -1,10 +1,9 @@
 use crate::models::{ApiKeyPermission, MemberRole};
 
 pub fn can_read_member(role: MemberRole) -> bool {
-    matches!(
-        role,
-        MemberRole::Read | MemberRole::Write | MemberRole::Admin
-    )
+    match role {
+        MemberRole::Read | MemberRole::Write | MemberRole::Admin => true,
+    }
 }
 
 pub fn can_write_member(role: MemberRole) -> bool {
@@ -108,5 +107,34 @@ mod tests {
             None,
             ApiKeyPermission::Write
         ));
+    }
+
+    #[test]
+    fn test_is_owner() {
+        assert!(is_owner("user-1", "user-1"));
+        assert!(!is_owner("user-1", "user-2"));
+    }
+
+    #[test]
+    fn test_roles_directly() {
+        assert!(can_read_member(MemberRole::Read));
+        assert!(can_read_member(MemberRole::Write));
+        assert!(can_read_member(MemberRole::Admin));
+
+        assert!(!can_write_member(MemberRole::Read));
+        assert!(can_write_member(MemberRole::Write));
+        assert!(can_write_member(MemberRole::Admin));
+
+        assert!(!can_admin_member(MemberRole::Read));
+        assert!(!can_admin_member(MemberRole::Write));
+        assert!(can_admin_member(MemberRole::Admin));
+    }
+
+    #[test]
+    fn test_api_keys_directly() {
+        assert!(can_read_api_key(ApiKeyPermission::Read));
+        assert!(can_read_api_key(ApiKeyPermission::Write));
+        assert!(!can_write_api_key(ApiKeyPermission::Read));
+        assert!(can_write_api_key(ApiKeyPermission::Write));
     }
 }

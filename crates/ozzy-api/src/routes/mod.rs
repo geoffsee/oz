@@ -726,6 +726,24 @@ mod tests {
     }
 
     #[test]
+    fn csrf_allows_session_auth_with_api_key_header() {
+        let auth = fake_auth(AuthMethod::Session);
+        let key = format!("Bearer {}{}", ozzy_core::API_KEY_PREFIX, "a".repeat(32));
+        assert!(auth_uses_api_key(&auth, Some(&key)));
+
+        assert!(!auth_uses_api_key(&auth, Some("Bearer short")));
+        assert!(!auth_uses_api_key(&auth, Some("Basic xyz")));
+    }
+
+    #[test]
+    fn test_new_csrf_token() {
+        let token1 = new_csrf_token();
+        let token2 = new_csrf_token();
+        assert_eq!(token1.len(), 36);
+        assert_ne!(token1, token2);
+    }
+
+    #[test]
     fn csrf_rejects_missing_token() {
         let err =
             validate_csrf_values(None, Some("expected")).expect_err("should reject missing token");
